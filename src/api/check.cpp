@@ -1,0 +1,170 @@
+// Copyright 2026 Intelligent Robotics Lab
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "kairos/check.hpp"
+
+#include <utility>
+#include <vector>
+
+#include "pddl/dialect.hpp"
+#include "pddl/parser.hpp"
+#include "orchestrator/orchestrator.hpp"
+#include "semantic/analyzer.hpp"
+
+namespace kairos
+{
+
+namespace
+{
+
+void append(std::vector<Diagnostic> & to, std::vector<Diagnostic> from)
+{
+  to.insert(to.end(), std::make_move_iterator(from.begin()), std::make_move_iterator(from.end()));
+}
+
+CheckReport finish(CheckReport report)
+{
+  report.valid = !has_errors(report.diagnostics);
+  return report;
+}
+
+FeatureSupport support_of(const orch::Support & s)
+{
+  FeatureSupport f;
+  f.feature = std::string(sem::to_string(s.feature));
+  for (auto r : sem::covering_requirements(s.feature)) {
+    f.requirements.emplace_back(r);
+  }
+  f.level = s.level == orch::Support::Full ? SupportLevel::Full :
+    (s.level == orch::Support::Partial ? SupportLevel::Partial : SupportLevel::None);
+  f.note = s.note;
+  return f;
+}
+
+// The support of the features a model uses
+void add_support(CheckReport & report, const sem::FeatureSet & features)
+{
+  for (const auto & s : orch::support_table()) {
+    if (features.contains(s.feature)) {
+      report.support.push_back(support_of(s));
+    }
+  }
+}
+
+// What Kairos cannot plan with yet: warnings here (the PDDL is still correct); returns whether
+// everything is supported
+bool add_unsupported(CheckReport & report, const sem::FeatureSet & features)
+{
+  add_support(report, features);
+  auto missing = orch::unsupported(features);
+  for (auto & d : missing) {
+    d.severity = Severity::Warning;
+    report.diagnostics.push_back(std::move(d));
+  }
+  return missing.empty();
+}
+
+}  // namespace
+
+std::string_view to_string(SupportLevel level)
+{
+  switch (level) {
+    case SupportLevel::Full: return "full";
+    case SupportLevel::Partial: return "partial";
+    case SupportLevel::None: return "none";
+  }
+  return "none";
+}
+
+std::vector<FeatureSupport> pddl_support()
+{
+  std::vector<FeatureSupport> out;
+  for (const auto & s : orch::support_table()) {
+    out.push_back(support_of(s));
+  }
+  return out;
+}
+
+CheckReport check_domain(std::string_view domain_text, std::string_view filename)
+{
+  CheckReport report;
+  auto parsed = pddl::parse_domain(domain_text, filename);
+  if (!parsed.ok()) {
+    report.diagnostics = parsed.take_diagnostics();
+    return finish(std::move(report));
+  }
+  auto repairs = pddl::repair_domain(*parsed);
+  auto model = sem::analyze_domain(*parsed);
+  report.diagnostics = parsed.take_diagnostics();
+  append(report.diagnostics, std::move(repairs));
+  bool supported = false;
+  if (model.ok()) {
+    report.features = model->features.names();
+    supported = add_unsupported(report, model->features);
+  }
+  append(report.diagnostics, model.take_diagnostics());
+  report = finish(std::move(report));
+  report.plannable = report.valid && supported;
+  return report;
+}
+
+CheckReport check_problem(std::string_view problem_text, std::string_view filename)
+{
+  CheckReport report;
+  auto parsed = pddl::parse_problem(problem_text, filename);
+  report.diagnostics = parsed.take_diagnostics();
+  if (parsed.ok()) {
+    append(report.diagnostics, sem::check_problem_alone(*parsed));
+  }
+  report = finish(std::move(report));
+  report.plannable_known = false;  // what the domain uses decides it
+  return report;
+}
+
+CheckReport check_problem(
+  std::string_view problem_text, std::string_view domain_text,
+  std::string_view problem_filename, std::string_view domain_filename)
+{
+  CheckReport report;
+  auto domain = pddl::parse_domain(domain_text, domain_filename);
+  auto problem = pddl::parse_problem(problem_text, problem_filename);
+  if (!domain.ok() || !problem.ok()) {
+    report.diagnostics = domain.take_diagnostics();
+    append(report.diagnostics, problem.take_diagnostics());
+    return finish(std::move(report));
+  }
+  auto repairs = pddl::repair_domain(*domain);
+  auto dmodel = sem::analyze_domain(*domain);
+  report.diagnostics = domain.take_diagnostics();
+  append(report.diagnostics, problem.take_diagnostics());
+  append(report.diagnostics, std::move(repairs));
+  if (!dmodel.ok()) {
+    append(report.diagnostics, dmodel.take_diagnostics());
+    return finish(std::move(report));
+  }
+  append(report.diagnostics, pddl::repair_problem(*problem, *domain));
+  auto pmodel = sem::analyze_problem(*problem, *domain, *dmodel);
+  append(report.diagnostics, dmodel.take_diagnostics());
+  bool supported = false;
+  if (pmodel.ok()) {
+    report.features = pmodel->features.names();
+    supported = add_unsupported(report, pmodel->features);
+  }
+  append(report.diagnostics, pmodel.take_diagnostics());
+  report = finish(std::move(report));
+  report.plannable = report.valid && supported;
+  return report;
+}
+
+}  // namespace kairos

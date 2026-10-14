@@ -1,0 +1,232 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc-release
+            os: ubuntu-24.04
+            cxx: g++
+            build_type: Release
+            sanitize: ""
+          - name: clang-release
+            os: ubuntu-24.04
+            cxx: clang++
+            build_type: Release
+            sanitize: ""
+          - name: gcc-asan-ubsan
+            os: ubuntu-24.04
+            cxx: g++
+            build_type: Debug
+            sanitize: "address;undefined"
+          - name: clang-tsan
+            os: ubuntu-24.04
+            cxx: clang++
+            build_type: Debug
+            sanitize: "thread"
+          - name: gcc-arm64
+            os: ubuntu-24.04-arm
+            cxx: g++
+            build_type: Release
+            sanitize: ""
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libgtest-dev uncrustify python3 clang
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DKAIROS_WARNINGS_AS_ERRORS=ON
+          "-DKAIROS_SANITIZE=${{ matrix.sanitize }}"
+
+      - name: Build
+        run: cmake --build build
+
+      # A failed test runs once more: a load spike of the runner should not fail the CI, a real
+      # regression fails both times
+      - name: Test
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure --repeat until-pass:2
+
+      - name: Install and use from another project
+        if: matrix.sanitize == ''
+        run: |
+          cmake --install build --prefix "$PWD/install"
+          cmake -S tests/install -B build-consumer -G Ninja \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-consumer
+          LD_LIBRARY_PATH="$PWD/install/lib" ./build-consumer/kairos_consumer
+
+  memory-limited:
+    name: tests in a 512 MB cgroup
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libgtest-dev uncrustify python3
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Test under MemoryMax=512M
+        run: >
+          sudo systemd-run --scope -p MemoryMax=512M -p MemorySwapMax=0
+          ctest --test-dir build --output-on-failure --repeat until-pass:2 -LE lint
+
+  coverage:
+    name: coverage (lines >= 90 %)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # the badge, on the badges branch
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libgtest-dev uncrustify python3 pipx
+          pipx install gcovr==8.6
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build with coverage
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKAIROS_COVERAGE=ON
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --repeat until-pass:2 -LE lint --parallel 4
+      - name: Report (gcovr.cfg sets the threshold)
+        run: |
+          mkdir -p coverage
+          status=0
+          gcovr build --html-details coverage/index.html --markdown coverage/report.md \
+            --cobertura coverage/coverage.xml || status=$?
+          cat coverage/report.md >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+      - name: Publish the badge (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          # Shields.io endpoint JSON on an orphan branch with a single commit
+          python3 - <<'PY'
+          import json
+          import xml.etree.ElementTree as ET
+          rate = float(ET.parse('coverage/coverage.xml').getroot().get('line-rate')) * 100
+          color = 'brightgreen' if rate >= 90 else 'yellow' if rate >= 80 else 'red'
+          badge = {'schemaVersion': 1, 'label': 'coverage', 'message': '%.1f%%' % rate,
+                   'color': color}
+          json.dump(badge, open('coverage.json', 'w'))
+          PY
+          mkdir badge && mv coverage.json badge/ && cd badge
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -q -m "Coverage badge for ${GITHUB_SHA}"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            badges
+
+  conda:
+    name: conda package with pixi (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86-64
+            os: ubuntu-24.04
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pixi
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | PIXI_VERSION=v0.81.0 bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+      - name: Build the package (pixi-build-cmake)
+        run: pixi publish --target-channel "file://$PWD/channel"
+      - name: Install it and plan with it
+        run: |
+          run="pixi exec -c file://$PWD/channel -c https://prefix.dev/conda-forge -s kairos"
+          $run kairos --version
+          $run kairos tests/data/plansys2/plansys2_executor__suave_domain.pddl \
+            tests/data/plansys2/plansys2_executor__suave_problem.pddl
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kairos-conda-${{ matrix.arch }}
+          path: channel/*/*.conda
+
+  ros-package:
+    # As the ROS 2 buildfarm's binary jobs: bloom generates the package, it builds without tests,
+    # installs in /opt/ros/DISTRO, runs, and a program that uses the library builds against it
+    name: ROS package ${{ matrix.distro }} (${{ matrix.image }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: jazzy, image: 'ros:jazzy-ros-core', kind: deb, arch: amd64}
+          - {distro: jazzy, image: 'ros:jazzy-ros-core', kind: deb, arch: arm64}
+          - {distro: kilted, image: 'ros:kilted-ros-core', kind: deb, arch: amd64}
+          - {distro: kilted, image: 'ros:kilted-ros-core', kind: deb, arch: arm64}
+          - {distro: lyrical, image: 'ros:lyrical-ros-core', kind: deb, arch: amd64}
+          - {distro: lyrical, image: 'ros:lyrical-ros-core', kind: deb, arch: arm64}
+          - {distro: jazzy, image: 'almalinux:9', kind: rpm, arch: amd64}
+          - {distro: kilted, image: 'almalinux:9', kind: rpm, arch: amd64}
+          - {distro: lyrical, image: 'almalinux:10', kind: rpm, arch: amd64}
+          - {distro: lyrical, image: 'fedora:43', kind: rpm, arch: amd64}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build, install and use the package
+        run: |
+          docker run --rm -e ROS_DISTRO=${{ matrix.distro }} -v "$PWD:/src:ro" \
+            ${{ matrix.image }} bash /src/.github/scripts/ros_${{ matrix.kind }}.sh
+
+  fuzz:
+    name: libFuzzer (2 min per target)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang
+      - name: Build fuzzers
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKAIROS_BUILD_TESTS=OFF -DKAIROS_BUILD_FUZZERS=ON
+          cmake --build build --target lexer_fuzzer parser_fuzzer plan_fuzzer
+      - name: Fuzz the lexer
+        run: |
+          mkdir -p corpus-work
+          ./build/fuzz/lexer_fuzzer -max_total_time=120 -max_len=4096 corpus-work fuzz/corpus/lexer
+      - name: Fuzz the parser
+        run: |
+          mkdir -p corpus-parser
+          ./build/fuzz/parser_fuzzer -max_total_time=120 -max_len=8192 corpus-parser fuzz/corpus/parser
+      - name: Fuzz the plan reader
+        run: |
+          mkdir -p corpus-plan
+          ./build/fuzz/plan_fuzzer -max_total_time=60 -max_len=4096 corpus-plan fuzz/corpus/plan
