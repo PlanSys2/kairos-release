@@ -1,3 +1,26 @@
+## kairos (jazzy) - 1.0.3-1
+
+The packages in the `kairos` repository were released into the `jazzy` distro by running `/usr/bin/bloom-release --rosdistro jazzy --track jazzy kairos --no-pull-request --override-release-repository-url https://github.com/PlanSys2/kairos-release.git` on `Sun, 18 Oct 2026 16:05:44 -0000`
+
+The `kairos` package was released.
+
+Version of package(s) in repository `kairos`:
+
+- upstream repository: https://github.com/PlanSys2/kairos.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `1.0.0-1`
+- new version: `1.0.3-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.4`
+- catkin_pkg version: `1.1.1`
+- rosdep version: `0.27.0`
+- rosdistro version: `1.1.0`
+- vcstools version: `0.1.42`
+
+
 ## kairos (humble) - 1.0.1-1
 
 The packages in the `kairos` repository were released into the `humble` distro by running `/usr/bin/bloom-release --rosdistro humble --track humble kairos --new-track --no-pull-request --override-release-repository-url https://github.com/PlanSys2/kairos-release.git` on `Sat, 17 Oct 2026 05:47:02 -0000`
