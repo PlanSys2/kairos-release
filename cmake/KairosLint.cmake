@@ -18,7 +18,8 @@ set(_lint_dirs
   ${PROJECT_SOURCE_DIR}/include
   ${PROJECT_SOURCE_DIR}/src
   ${PROJECT_SOURCE_DIR}/tests
-  ${PROJECT_SOURCE_DIR}/fuzz)
+  ${PROJECT_SOURCE_DIR}/fuzz
+  ${PROJECT_SOURCE_DIR}/python/src)
 
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
@@ -30,13 +31,27 @@ else()
 endif()
 
 find_program(KAIROS_UNCRUSTIFY uncrustify)
+# The configuration uses options of uncrustify 0.78 (older ones reject it: Ubuntu 22.04 has 0.72)
+set(_uncrustify_min 0.78)
+if(KAIROS_UNCRUSTIFY)
+  execute_process(COMMAND ${KAIROS_UNCRUSTIFY} --version OUTPUT_VARIABLE _uncrustify_out
+    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+  string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" _uncrustify_version "${_uncrustify_out}")
+  if(_uncrustify_version VERSION_LESS _uncrustify_min)
+    message(WARNING "uncrustify ${_uncrustify_version} is older than ${_uncrustify_min}: "
+      "the uncrustify test is disabled")
+    unset(KAIROS_UNCRUSTIFY CACHE)
+    set(KAIROS_UNCRUSTIFY "")
+  endif()
+endif()
 if(KAIROS_UNCRUSTIFY)
   # Glob at configure time; re-run cmake after adding files
   file(GLOB_RECURSE _lint_files CONFIGURE_DEPENDS
     ${PROJECT_SOURCE_DIR}/include/*.hpp
     ${PROJECT_SOURCE_DIR}/src/*.hpp ${PROJECT_SOURCE_DIR}/src/*.cpp
     ${PROJECT_SOURCE_DIR}/tests/*.hpp ${PROJECT_SOURCE_DIR}/tests/*.cpp
-    ${PROJECT_SOURCE_DIR}/fuzz/*.cpp)
+    ${PROJECT_SOURCE_DIR}/fuzz/*.cpp
+    ${PROJECT_SOURCE_DIR}/python/src/*.cpp)
   add_test(NAME uncrustify
     COMMAND ${KAIROS_UNCRUSTIFY} -c ${PROJECT_SOURCE_DIR}/tools/lint/uncrustify.cfg
       --check -q ${_lint_files})
