@@ -2,7 +2,7 @@
   <img src="docs/images/kairos_white.png" alt="Kairos logo" width="450">
 </p>
 
-<h1 align="center">Kairos</h1>
+<h1 align="center">Kairos (καιρός)</h1>
 
 <p align="center">
   <b>A modern temporal and numeric PDDL planner in C++20, usable as a library and as an
@@ -14,7 +14,7 @@
   <a href="https://github.com/PlanSys2/kairos/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/PlanSys2/kairos/badges/coverage.json&amp;cacheSeconds=3600" alt="Coverage"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-informational.svg" alt="C++20">
-  <img src="https://img.shields.io/badge/CMake-%E2%89%A5%203.24-064F8C?logo=cmake" alt="CMake 3.24 or newer">
+  <img src="https://img.shields.io/badge/CMake-%E2%89%A5%203.22-064F8C?logo=cmake" alt="CMake 3.22 or newer">
   <a href="https://pixi.sh"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/prefix-dev/pixi/main/assets/badge/v0.json" alt="Powered by Pixi"></a>
   <img src="https://img.shields.io/badge/platforms-Linux%20x86--64%20%7C%20ARM64-lightgrey" alt="Linux x86-64 and ARM64">
   <img src="https://img.shields.io/badge/PDDL-3.1%20%7C%20PDDL%2B-8A2BE2" alt="PDDL 3.1 and PDDL+">
@@ -137,6 +137,19 @@ minimizes their cost), a car factory, elevators, a road trip with fuel, an under
 derived predicates. [docs/examples.md](docs/examples.md) explains each one and gives the command
 to run it.
 
+## From Python
+
+`pip install kairos-planner` (Linux, x86-64 and arm64) gives the `kairos` module and command:
+
+```python
+import kairos
+result = kairos.solve("domain.pddl", "problem.pddl", timeout=10)
+print(result.status, result.plan)
+```
+
+Anytime search, validation, checking and the diagnostics are there too: see
+[python/README.md](python/README.md). From a source tree, `pip install .`.
+
 ## With PlanSys2
 
 A native PlanSys2 plugin comes later. Until then, Kairos runs behind PlanSys2's POPF plugin:
@@ -203,10 +216,10 @@ pixi publish --to https://prefix.dev/<channel>      # or upload it to a channel
 ```
 
 Requirements:
-- CMake ≥ 3.24.
-- GCC ≥ 13 or Clang ≥ 17.
+- CMake ≥ 3.22.
+- GCC ≥ 11 or Clang ≥ 17.
 - For the tests: GoogleTest (the system package, or fetched automatically), python3 and
-  uncrustify.
+  uncrustify ≥ 0.78 (with an older one, the style test is disabled).
 
 ### Options
 
@@ -217,6 +230,7 @@ Requirements:
 | `KAIROS_SANITIZE` | empty | `address;undefined` or `thread` |
 | `KAIROS_WARNINGS_AS_ERRORS` | OFF | `-Werror` (ON in CI) |
 | `KAIROS_COVERAGE` | OFF | Coverage instrumentation |
+| `KAIROS_BUILD_PYTHON` | OFF | The Python module (nanobind; `pip install .` turns it on) |
 
 ### Using Kairos from another CMake project
 
@@ -280,6 +294,7 @@ tools/fetch_corpus.sh  downloads the public PDDL benchmark collections used by c
 tools/plansys2/   popf_overlay.sh: Kairos behind PlanSys2's POPF plugin
 cmake/            compiler options, lint tests, package config
 fuzz/             fuzz targets and seed corpus (also replayed as tests)
+python/           Python module (nanobind bindings, the kairos package, its tests)
 docs/             documentation and images
 ```
 
