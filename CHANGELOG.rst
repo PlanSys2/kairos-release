@@ -2,6 +2,37 @@
 Changelog for package kairos
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.0.3 (2026-10-18)
+------------------
+* Python: ``pip install kairos-planner`` (wheels for Linux x86-64 and arm64): parse, check,
+  plan (blocking, in the background or as an iterator of better plans) and validate, with the
+  diagnostics; planning releases the GIL and Ctrl-C stops it. The wheel has the ``kairos``
+  command too.
+* A search stopped by the caller while the steps of time were still searching after M3 ran out
+  of states is cancelled, not "no plan found".
+* The static ``libkairos`` is position independent (it links into shared objects).
+* The goal holds after the last timed initial literal too, as VAL and the validator check it:
+  M3 took a goal state as a plan before later literals, and every plan it found could fail
+  validation (an internal error). A goal state of M3 with timed literals counts once its plan
+  is valid; the search goes on otherwise.
+* Reads the PDDL that UPF's writer gives: several constraints in ``:constraints`` without
+  ``and``, and timed initial fluents as ``(at t (assign (f) v))`` (with a warning).
+* Python: ``SearchOptions`` given to ``solve`` (what ``SolveOptions`` has).
+* Contributors: Francisco Martín Rico
+
+1.0.2 (2026-10-18)
+------------------
+* Proofs that a temporal task has no plan: the timed initial literals take away what the goal
+  needs too soon (from the initial state, ignoring deletes, with the shortest durations), or the
+  task without durations nor times has no path to the goal (when M3 runs out of states).
+* Steps of time: the time is kept only with timed initial literals, until the last one, and
+  epsilon passes only right after a happening; tiny tasks that ran to the timeout end in ms.
+* With several threads, the phases for when there is no plan stop once another finds one.
+* M3 out of states while the steps of time run out of time is a timeout, not "no plan found".
+* The deadlines of M3 no longer take durations that change as bounds, nor over all conditions
+  an action's start gives itself as needed before it.
+* Contributors: Francisco Martín Rico
+
 1.0.1 (2026-10-17)
 ------------------
 * Builds on Ubuntu 22.04 and ROS 2 Humble: CMake 3.22 is enough (nothing needed 3.24), and the
