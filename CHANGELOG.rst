@@ -2,6 +2,23 @@
 Changelog for package kairos
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.0.5 (2026-10-21)
+------------------
+* Fixed: a temporal task simple by value where M2 ran out of states was reported unsolvable,
+  but such a task may still need actions to overlap (two robots that each grip a table at start
+  and need the other's grip at their end). M2 running out of states is no proof now: Kairos
+  searches the task without durations nor times and, if that does not prove there is no plan,
+  M3 searches the time left (also without anytime, with one search or several threads).
+* Contributors: Francisco Martín Rico
+
+1.0.4 (2026-10-18)
+------------------
+* The validator with epsilon 0 (``ValidateOptions::epsilon``, ``kairos validate --epsilon 0``):
+  no separation, so a happening may read what another at the same instant writes (conditions
+  read the state before, effects apply together), as UPF validates problems without an epsilon.
+  Writes that disagree are still interference.
+* Contributors: Francisco Martín Rico
+
 1.0.3 (2026-10-18)
 ------------------
 * Python: ``pip install kairos-planner`` (wheels for Linux x86-64 and arm64): parse, check,
